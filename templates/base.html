@@ -51,6 +51,36 @@
                             <i class="bi bi-person-plus-fill me-1"></i>Create User
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('update_requests') }}">
+                            <i class="bi bi-clipboard-check me-1"></i>Update Requests
+                            {% if g.pending_requests_count %}
+                            <span class="badge bg-warning text-dark">{{ g.pending_requests_count }}</span>
+                            {% endif %}
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_backup', action='view') }}">
+                            <i class="bi bi-database-fill-gear me-1"></i>Database Backup
+                        </a>
+                    </li>
+                    {% elif session.is_agent %}
+                    <!-- Agent Navigation -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('agent_onboarding') }}">
+                            <i class="bi bi-person-plus me-1"></i>Add Employee
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('all_employees') }}">
+                            <i class="bi bi-list-ul me-1"></i>View Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('agent_dashboard') }}">
+                            <i class="bi bi-clipboard-check me-1"></i>My Update Requests
+                        </a>
+                    </li>
                     {% else %}
                     <!-- Employee Navigation -->
                     <li class="nav-item">

@@ -40,6 +40,21 @@
                                 <input type="text" class="form-control" id="employee_id" name="employee_id" placeholder="Enter employee ID" required>
                             </div>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">User Type</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user_type" id="regular_user" value="regular" checked>
+                                <label class="form-check-label" for="regular_user">
+                                    Regular User (Employee)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user_type" id="agent_user" value="agent">
+                                <label class="form-check-label" for="agent_user">
+                                    Agent (Can fill employee details)
+                                </label>
+                            </div>
+                        </div>
                         <div class="d-grid mt-4">
                             <button type="submit" class="btn btn-primary btn-lg">
                                 <i class="bi bi-person-plus me-2"></i>Create User
@@ -91,11 +106,20 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="row">
+                        <div class="row mb-2">
                             <div class="col-4 fw-bold">Employee ID:</div>
                             <div class="col-7">{{ new_employee_id }}</div>
                             <div class="col-1">
                                 <button type="button" class="btn btn-sm btn-outline-secondary copy-btn" data-clipboard-text="{{ new_employee_id }}">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-4 fw-bold">User Type:</div>
+                            <div class="col-7">{{ new_user_type }}</div>
+                            <div class="col-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary copy-btn" data-clipboard-text="{{ new_user_type }}">
                                     <i class="bi bi-clipboard"></i>
                                 </button>
                             </div>
@@ -105,7 +129,7 @@
                 
                 <div class="d-grid mb-3">
                     <button type="button" class="btn btn-outline-primary copy-all-btn" 
-                            data-clipboard-text="Username: {{ new_username }}&#10;Password: {{ new_password }}&#10;Employee ID: {{ new_employee_id }}">
+                            data-clipboard-text="Username: {{ new_username }}&#10;Password: {{ new_password }}&#10;Employee ID: {{ new_employee_id }}&#10;User Type: {{ new_user_type }}">
                         <i class="bi bi-clipboard-check me-2"></i>Copy All Credentials
                     </button>
                 </div>
