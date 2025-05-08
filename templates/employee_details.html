@@ -17,12 +17,20 @@
             <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="bi bi-person-badge me-2"></i>Employee Details</h4>
                 <div>
+                    {% if session.is_admin %}
                     <a href="{{ url_for('edit_employee', id=employee.id) }}" class="btn btn-warning btn-sm">
                         <i class="bi bi-pencil me-1"></i>Edit
                     </a>
                     <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteModal">
                         <i class="bi bi-trash me-1"></i>Delete
                     </button>
+                    {% elif session.is_agent %}
+                    {% if employee.created_by == session.user_id %}
+                    <a href="{{ url_for('request_update', employee_id=employee.id) }}" class="btn btn-info btn-sm">
+                        <i class="bi bi-pencil-square me-1"></i>Request Update
+                    </a>
+                    {% endif %}
+                    {% endif %}
                 </div>
             </div>
             <div class="card-body">
@@ -109,6 +117,20 @@
                                     <p class="mb-1"><i class="bi bi-clock-history me-2 text-info"></i><strong>Added to System:</strong></p>
                                     <p class="ms-4">{{ employee.created_at.strftime('%B %d, %Y %H:%M') }}</p>
                                 </div>
+                                
+                                {% if employee.created_by %}
+                                <div class="mb-2">
+                                    <p class="mb-1"><i class="bi bi-person-add me-2 text-info"></i><strong>Created By:</strong></p>
+                                    <p class="ms-4">{{ creator.username if creator else 'Unknown' }}</p>
+                                </div>
+                                {% endif %}
+                                
+                                {% if employee.last_updated_by %}
+                                <div class="mb-2">
+                                    <p class="mb-1"><i class="bi bi-pencil-square me-2 text-info"></i><strong>Last Updated By:</strong></p>
+                                    <p class="ms-4">{{ updater.username if updater else 'Unknown' }} ({{ employee.last_updated_at.strftime('%B %d, %Y %H:%M') }})</p>
+                                </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>

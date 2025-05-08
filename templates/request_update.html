@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+
+{% block title %}Request Update - Employee Management System{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-pencil-square me-2 text-primary"></i>
+                        Request Update for {{ employee.first_name }} {{ employee.last_name }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-4">
+                        <div class="col-md-12">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                To update employee information, you need to submit a request to the admin. Once approved, you'll be able to edit the employee details.
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <form method="POST" action="{{ url_for('request_update', employee_id=employee.id) }}">
+                        <div class="row mb-4">
+                            <div class="col-md-12">
+                                <h5 class="border-bottom pb-2 mb-3">Employee Information</h5>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" value="{{ employee.employee_id }}" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" value="{{ employee.first_name }} {{ employee.last_name }}" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Department</label>
+                                    <input type="text" class="form-control" value="{{ employee.department }}" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Position</label>
+                                    <input type="text" class="form-control" value="{{ employee.position }}" readonly>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-12">
+                                <h5 class="border-bottom pb-2 mb-3">Update Request Details</h5>
+                            </div>
+                            <div class="col-md-12">
+                                <div class="mb-3">
+                                    <label for="reason" class="form-label">Reason for Update *</label>
+                                    <textarea class="form-control" id="reason" name="reason" rows="3" required></textarea>
+                                    <div class="form-text">Please provide a detailed reason why this employee's information needs to be updated.</div>
+                                </div>
+                            </div>
+                            <div class="col-md-12">
+                                <div class="mb-3">
+                                    <label class="form-label">Fields to Update *</label>
+                                    <div class="form-text mb-2">Select the fields you need to update:</div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="personal_info" id="personal_info">
+                                                <label class="form-check-label" for="personal_info">
+                                                    Personal Information
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="contact_info" id="contact_info">
+                                                <label class="form-check-label" for="contact_info">
+                                                    Contact Information
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="address" id="address">
+                                                <label class="form-check-label" for="address">
+                                                    Address
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="department_position" id="department_position">
+                                                <label class="form-check-label" for="department_position">
+                                                    Department/Position
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="salary" id="salary">
+                                                <label class="form-check-label" for="salary">
+                                                    Salary
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="profile_picture" id="profile_picture">
+                                                <label class="form-check-label" for="profile_picture">
+                                                    Profile Picture
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="education" id="education">
+                                                <label class="form-check-label" for="education">
+                                                    Education
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="certifications" id="certifications">
+                                                <label class="form-check-label" for="certifications">
+                                                    Certifications
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" name="fields_to_update" value="documents" id="documents">
+                                                <label class="form-check-label" for="documents">
+                                                    Documents
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-12">
+                                <div class="mb-3">
+                                    <label for="additional_notes" class="form-label">Additional Notes</label>
+                                    <textarea class="form-control" id="additional_notes" name="additional_notes" rows="3"></textarea>
+                                    <div class="form-text">Provide any additional information that might be helpful for the admin to understand your request.</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary me-md-2">
+                                <i class="bi bi-x-circle me-2"></i>Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-send me-2"></i>Submit Update Request
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Form validation
+        const form = document.querySelector('form');
+        form.addEventListener('submit', function(event) {
+            const checkboxes = document.querySelectorAll('input[name="fields_to_update"]:checked');
+            if (checkboxes.length === 0) {
+                event.preventDefault();
+                alert('Please select at least one field to update.');
+            }
+        });
+    });
+</script>
+{% endblock %}

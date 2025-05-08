@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+
+{% block title %}Database Backup - Employee Management System{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-database-fill-gear me-2 text-primary"></i>
+                        Database Backup Management
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-4">
+                        <div class="col-md-12">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                This page allows you to create backups of the database and restore from previous backups if needed.
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-4">
+                        <div class="col-md-12">
+                            <form method="POST" action="{{ url_for('admin_backup', action='create') }}">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-download me-2"></i>Take Backup
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-12">
+                            <h5 class="border-bottom pb-2 mb-3">Available Backups</h5>
+                            
+                            {% if backups %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Filename</th>
+                                                <th>Timestamp</th>
+                                                <th>Size</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for backup in backups %}
+                                                <tr>
+                                                    <td>{{ backup.filename }}</td>
+                                                    <td>{{ backup.timestamp }}</td>
+                                                    <td>{{ backup.size }}</td>
+                                                    <td>
+                                                        <button type="button" class="btn btn-warning btn-sm" 
+                                                                data-bs-toggle="modal" 
+                                                                data-bs-target="#restoreModal" 
+                                                                data-backup-file="{{ backup.filename }}">
+                                                            <i class="bi bi-arrow-counterclockwise me-1"></i>Restore
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% else %}
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-triangle me-2"></i>
+                                    No backup files found. Create your first backup using the button above.
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Restore Confirmation Modal -->
+<div class="modal fade" id="restoreModal" tabindex="-1" aria-labelledby="restoreModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="restoreModalLabel">Confirm Database Restore</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Warning:</strong> Restoring from a backup will replace the current database. All changes made since the backup was created will be lost.
+                </div>
+                <p>Are you sure you want to restore the database from this backup?</p>
+                <p><strong>Backup file:</strong> <span id="backupFileName"></span></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="restoreForm" method="POST" action="{{ url_for('admin_backup', action='restore') }}">
+                    <input type="hidden" id="backupFileInput" name="backup_file" value="">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Restore Database
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Handle restore modal
+        const restoreModal = document.getElementById('restoreModal');
+        if (restoreModal) {
+            restoreModal.addEventListener('show.bs.modal', function(event) {
+                const button = event.relatedTarget;
+                const backupFile = button.getAttribute('data-backup-file');
+                
+                const backupFileName = document.getElementById('backupFileName');
+                const backupFileInput = document.getElementById('backupFileInput');
+                
+                backupFileName.textContent = backupFile;
+                backupFileInput.value = backupFile;
+            });
+        }
+    });
+</script>
+{% endblock %}

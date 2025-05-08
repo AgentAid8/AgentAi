@@ -1,0 +1,501 @@
+{% extends 'base.html' %}
+
+{% block title %}Update Requests - Employee Management System{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-clipboard-check me-2 text-primary"></i>
+                        Employee Update Requests
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs mb-4" id="requestTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button" role="tab" aria-controls="pending" aria-selected="true">
+                                <i class="bi bi-hourglass-split me-2"></i>Pending
+                                <span class="badge bg-warning text-dark ms-1">{{ pending_requests|length }}</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="approved-tab" data-bs-toggle="tab" data-bs-target="#approved" type="button" role="tab" aria-controls="approved" aria-selected="false">
+                                <i class="bi bi-check-circle me-2"></i>Approved
+                                <span class="badge bg-success ms-1">{{ approved_requests|length }}</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="rejected-tab" data-bs-toggle="tab" data-bs-target="#rejected" type="button" role="tab" aria-controls="rejected" aria-selected="false">
+                                <i class="bi bi-x-circle me-2"></i>Rejected
+                                <span class="badge bg-danger ms-1">{{ rejected_requests|length }}</span>
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    <div class="tab-content" id="requestTabsContent">
+                        <!-- Pending Requests Tab -->
+                        <div class="tab-pane fade show active" id="pending" role="tabpanel" aria-labelledby="pending-tab">
+                            {% if pending_requests %}
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Employee</th>
+                                            <th>Requested By</th>
+                                            <th>Date</th>
+                                            <th>Fields to Update</th>
+                                            <th>Reason</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for request in pending_requests %}
+                                        <tr>
+                                            <td>
+                                                <a href="{{ url_for('employee_details', id=request.employee.id) }}" class="text-decoration-none">
+                                                    {{ request.employee.first_name }} {{ request.employee.last_name }}
+                                                </a>
+                                            </td>
+                                            <td>{{ request.requester.username }}</td>
+                                            <td>{{ request.request_date.strftime('%Y-%m-%d') }}</td>
+                                            <td>
+                                                {% set fields = request.fields_to_update|fromjson %}
+                                                {% for field in fields %}
+                                                <span class="badge bg-light text-dark field-badge">{{ field|replace('_', ' ')|title }}</span>
+                                                {% endfor %}
+                                            </td>
+                                            <td>{{ request.reason|truncate(50) }}</td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#requestModal{{ request.id }}">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Modal for Request Details -->
+                                        <div class="modal fade" id="requestModal{{ request.id }}" tabindex="-1" aria-labelledby="requestModalLabel{{ request.id }}" aria-hidden="true">
+                                            <div class="modal-dialog modal-lg">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title" id="requestModalLabel{{ request.id }}">
+                                                            Update Request Details
+                                                        </h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                    </div>
+                                                    <div class="modal-body">
+                                                        <div class="row mb-3">
+                                                            <div class="col-md-6">
+                                                                <p><strong>Employee:</strong> {{ request.employee.first_name }} {{ request.employee.last_name }}</p>
+                                                                <p><strong>Employee ID:</strong> {{ request.employee.employee_id }}</p>
+                                                                <p><strong>Department:</strong> {{ request.employee.department }}</p>
+                                                            </div>
+                                                            <div class="col-md-6">
+                                                                <p><strong>Requested By:</strong> {{ request.requester.username }}</p>
+                                                                <p><strong>Request Date:</strong> {{ request.request_date.strftime('%Y-%m-%d %H:%M') }}</p>
+                                                                <p><strong>Status:</strong> <span class="badge bg-warning text-dark">Pending</span></p>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Fields to Update:</h6>
+                                                            <div>
+                                                                {% set fields = request.fields_to_update|fromjson %}
+                                                                {% for field in fields %}
+                                                                <span class="badge bg-light text-dark me-1 mb-1">{{ field|replace('_', ' ')|title }}</span>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Reason:</h6>
+                                                            <div class="card">
+                                                                <div class="card-body bg-light">
+                                                                    {{ request.reason|nl2br }}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                            <h6>Admin Notes:</h6>
+                                                            <textarea class="form-control" id="adminNotes{{ request.id }}" rows="3" placeholder="Optional: Add notes about this request (will be visible to the agent)"></textarea>
+                                                        </div>
+                                                        
+                                                    <div class="modal-footer">
+                                                        <form action="{{ url_for('process_update_request', request_id=request.id, action='reject') }}" method="POST" class="d-inline modal-form">
+                                                            <input type="hidden" name="admin_notes" id="rejectNotes{{ request.id }}">
+                                                            <button type="button" class="btn btn-outline-danger reject-btn" data-request-id="{{ request.id }}">
+                                                                <i class="bi bi-x-circle me-2"></i>Reject
+                                                            </button>
+                                                        </form>
+                                                        <form action="{{ url_for('process_update_request', request_id=request.id, action='approve') }}" method="POST" class="d-inline modal-form">
+                                                            <input type="hidden" name="admin_notes" id="approveNotes{{ request.id }}">
+                                                            <button type="button" class="btn btn-success approve-btn" data-request-id="{{ request.id }}">
+                                                                <i class="bi bi-check-circle me-2"></i>Approve
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                There are no pending update requests.
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Approved Requests Tab -->
+                        <div class="tab-pane fade" id="approved" role="tabpanel" aria-labelledby="approved-tab">
+                            {% if approved_requests %}
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Employee</th>
+                                            <th>Requested By</th>
+                                            <th>Request Date</th>
+                                            <th>Approved Date</th>
+                                            <th>Approved By</th>
+                                            <th>Fields Updated</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for request in approved_requests %}
+                                        <tr>
+                                            <td>
+                                                <a href="{{ url_for('employee_details', id=request.employee.id) }}" class="text-decoration-none">
+                                                    {{ request.employee.first_name }} {{ request.employee.last_name }}
+                                                </a>
+                                            </td>
+                                            <td>{{ request.requester.username }}</td>
+                                            <td>{{ request.request_date.strftime('%Y-%m-%d') }}</td>
+                                            <td>{{ request.approval_date.strftime('%Y-%m-%d') if request.approval_date else 'N/A' }}</td>
+                                            <td>{{ request.approver.username if request.approver else 'N/A' }}</td>
+                                            <td>
+                                                {% set fields = request.fields_to_update|fromjson %}
+                                                {% for field in fields %}
+                                                <span class="badge bg-light text-dark field-badge">{{ field|replace('_', ' ')|title }}</span>
+                                                {% endfor %}
+                                            </td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#approvedModal{{ request.id }}">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Modal for Approved Request Details -->
+                                        <div class="modal fade" id="approvedModal{{ request.id }}" tabindex="-1" aria-labelledby="approvedModalLabel{{ request.id }}" aria-hidden="true">
+                                            <div class="modal-dialog modal-lg">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title" id="approvedModalLabel{{ request.id }}">
+                                                            Approved Update Request Details
+                                                        </h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                    </div>
+                                                    <div class="modal-body">
+                                                        <div class="row mb-3">
+                                                            <div class="col-md-6">
+                                                                <p><strong>Employee:</strong> {{ request.employee.first_name }} {{ request.employee.last_name }}</p>
+                                                                <p><strong>Employee ID:</strong> {{ request.employee.employee_id }}</p>
+                                                                <p><strong>Department:</strong> {{ request.employee.department }}</p>
+                                                            </div>
+                                                            <div class="col-md-6">
+                                                                <p><strong>Requested By:</strong> {{ request.requester.username }}</p>
+                                                                <p><strong>Request Date:</strong> {{ request.request_date.strftime('%Y-%m-%d %H:%M') }}</p>
+                                                                <p><strong>Status:</strong> <span class="badge bg-success">Approved</span></p>
+                                                                <p><strong>Approved By:</strong> {{ request.approver.username if request.approver else 'N/A' }}</p>
+                                                                <p><strong>Approval Date:</strong> {{ request.approval_date.strftime('%Y-%m-%d %H:%M') if request.approval_date else 'N/A' }}</p>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Fields Updated:</h6>
+                                                            <div>
+                                                                {% set fields = request.fields_to_update|fromjson %}
+                                                                {% for field in fields %}
+                                                                <span class="badge bg-light text-dark me-1 mb-1">{{ field|replace('_', ' ')|title }}</span>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Reason:</h6>
+                                                            <div class="card">
+                                                                <div class="card-body bg-light">
+                                                                    {{ request.reason|nl2br }}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {% if request.admin_notes %}
+                                                        <div class="mb-3">
+                                                            <h6>Admin Notes:</h6>
+                                                            <div class="card border-success">
+                                                                <div class="card-body bg-light">
+                                                                    {{ request.admin_notes|nl2br }}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                        <a href="{{ url_for('employee_details', id=request.employee.id) }}" class="btn btn-primary">
+                                                            <i class="bi bi-person me-2"></i>View Employee
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                There are no approved update requests.
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Rejected Requests Tab -->
+                        <div class="tab-pane fade" id="rejected" role="tabpanel" aria-labelledby="rejected-tab">
+                            {% if rejected_requests %}
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Employee</th>
+                                            <th>Requested By</th>
+                                            <th>Request Date</th>
+                                            <th>Fields Requested</th>
+                                            <th>Reason</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for request in rejected_requests %}
+                                        <tr>
+                                            <td>
+                                                <a href="{{ url_for('employee_details', id=request.employee.id) }}" class="text-decoration-none">
+                                                    {{ request.employee.first_name }} {{ request.employee.last_name }}
+                                                </a>
+                                            </td>
+                                            <td>{{ request.requester.username }}</td>
+                                            <td>{{ request.request_date.strftime('%Y-%m-%d') }}</td>
+                                            <td>
+                                                {% set fields = request.fields_to_update|fromjson %}
+                                                {% for field in fields %}
+                                                <span class="badge bg-light text-dark field-badge">{{ field|replace('_', ' ')|title }}</span>
+                                                {% endfor %}
+                                            </td>
+                                            <td>{{ request.reason|truncate(50) }}</td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#rejectedModal{{ request.id }}">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Modal for Rejected Request Details -->
+                                        <div class="modal fade" id="rejectedModal{{ request.id }}" tabindex="-1" aria-labelledby="rejectedModalLabel{{ request.id }}" aria-hidden="true">
+                                            <div class="modal-dialog modal-lg">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title" id="rejectedModalLabel{{ request.id }}">
+                                                            Rejected Update Request Details
+                                                        </h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                    </div>
+                                                    <div class="modal-body">
+                                                        <div class="row mb-3">
+                                                            <div class="col-md-6">
+                                                                <p><strong>Employee:</strong> {{ request.employee.first_name }} {{ request.employee.last_name }}</p>
+                                                                <p><strong>Employee ID:</strong> {{ request.employee.employee_id }}</p>
+                                                                <p><strong>Department:</strong> {{ request.employee.department }}</p>
+                                                            </div>
+                                                            <div class="col-md-6">
+                                                                <p><strong>Requested By:</strong> {{ request.requester.username }}</p>
+                                                                <p><strong>Request Date:</strong> {{ request.request_date.strftime('%Y-%m-%d %H:%M') }}</p>
+                                                                <p><strong>Status:</strong> <span class="badge bg-danger">Rejected</span></p>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Fields Requested:</h6>
+                                                            <div>
+                                                                {% set fields = request.fields_to_update|fromjson %}
+                                                                {% for field in fields %}
+                                                                <span class="badge bg-light text-dark me-1 mb-1">{{ field|replace('_', ' ')|title }}</span>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div class="mb-3">
+                                                            <h6>Reason:</h6>
+                                                            <div class="card">
+                                                                <div class="card-body bg-light">
+                                                                    {{ request.reason|nl2br }}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {% if request.admin_notes %}
+                                                        <div class="mb-3">
+                                                            <h6>Admin Notes:</h6>
+                                                            <div class="card border-danger">
+                                                                <div class="card-body bg-light">
+                                                                    {{ request.admin_notes|nl2br }}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                        <form action="{{ url_for('process_update_request', request_id=request.id, action='approve') }}" method="POST" class="d-inline modal-form">
+                                                            <input type="hidden" name="admin_notes" id="approveInsteadNotes{{ request.id }}">
+                                                            <button type="button" class="btn btn-success approve-instead-btn" data-request-id="{{ request.id }}">
+                                                                <i class="bi bi-check-circle me-2"></i>Approve Instead
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                There are no rejected update requests.
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Fix the display of fields_to_update
+        document.querySelectorAll('.field-badge').forEach(function(badge) {
+            // Remove any unwanted characters
+            let text = badge.textContent.trim();
+            if (text.includes('"') || text.includes('[') || text.includes(']')) {
+                text = text.replace(/[\[\]"]/g, '');
+                badge.textContent = text.trim();
+            }
+            
+            // Format field names for better display
+            text = badge.textContent.trim();
+            // Replace underscores with spaces and capitalize each word
+            text = text.replace(/_/g, ' ').replace(/\w\S*/g, function(txt) {
+                return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+            });
+            badge.textContent = text;
+        });
+        
+        // Store modal instances to prevent recreation
+        const modalInstances = {};
+        
+        // Fix modal blinking issue by properly initializing Bootstrap modals
+        const viewButtons = document.querySelectorAll('[data-bs-toggle="modal"]');
+        viewButtons.forEach(function(button) {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const targetModalId = this.getAttribute('data-bs-target');
+                const modalElement = document.querySelector(targetModalId);
+                
+                // Create a modal instance if it doesn't exist yet
+                if (!modalInstances[targetModalId]) {
+                    modalInstances[targetModalId] = new bootstrap.Modal(modalElement, {
+                        backdrop: 'static',
+                        keyboard: false
+                    });
+                    
+                    // Add event listeners to prevent modal from closing unexpectedly
+                    modalElement.addEventListener('click', function(event) {
+                        // Prevent clicks inside the modal from closing it
+                        event.stopPropagation();
+                    });
+                    
+                    // Prevent mouseenter/mouseleave events from affecting the modal
+                    modalElement.addEventListener('mouseenter', function(event) {
+                        event.stopPropagation();
+                    });
+                    
+                    modalElement.addEventListener('mouseleave', function(event) {
+                        event.stopPropagation();
+                    });
+                }
+                
+                // Show the modal
+                modalInstances[targetModalId].show();
+            });
+        });
+        
+        // Handle approve and reject buttons
+        document.querySelectorAll('.approve-btn').forEach(function(button) {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const requestId = this.getAttribute('data-request-id');
+                document.getElementById('approveNotes' + requestId).value = document.getElementById('adminNotes' + requestId).value;
+                this.closest('form').submit();
+            });
+        });
+        
+        document.querySelectorAll('.reject-btn').forEach(function(button) {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const requestId = this.getAttribute('data-request-id');
+                document.getElementById('rejectNotes' + requestId).value = document.getElementById('adminNotes' + requestId).value;
+                this.closest('form').submit();
+            });
+        });
+        
+        // Handle approve-instead button
+        document.querySelectorAll('.approve-instead-btn').forEach(function(button) {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const requestId = this.getAttribute('data-request-id');
+                const notes = prompt('Enter notes for approving this request (optional):');
+                document.getElementById('approveInsteadNotes' + requestId).value = notes || '';
+                this.closest('form').submit();
+            });
+        });
+        
+        // Ensure forms in modals don't cause the modal to close unexpectedly
+        document.querySelectorAll('.modal-form').forEach(function(form) {
+            form.addEventListener('submit', function(e) {
+                // Let the form submit normally but prevent any default modal behavior
+                e.stopPropagation();
+            });
+        });
+    });
+</script>
+{% endblock %}

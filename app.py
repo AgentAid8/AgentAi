@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory, g
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 from functools import wraps
@@ -7,16 +7,120 @@ import os
 import json
 import hashlib
 import uuid
+import re
+import shutil
+import humanize
 from werkzeug.utils import secure_filename
 from google_drive_helper import GoogleDriveHelper
 
 app = Flask(__name__)
+
+def format_field_name(field_name):
+    """Format field names for better readability in the UI"""
+    if not field_name:
+        return ""
+    
+    # Handle special cases for common abbreviations
+    special_cases = {
+        "id": "ID",
+        "url": "URL",
+        "api": "API",
+    }
+    
+    # Replace underscores with spaces
+    formatted = field_name.replace('_', ' ')
+    
+    # Split into words
+    words = formatted.split()
+    
+    # Process each word
+    for i, word in enumerate(words):
+        # Check for special cases (case-insensitive)
+        lower_word = word.lower()
+        if lower_word in special_cases:
+            words[i] = special_cases[lower_word]
+        else:
+            # Capitalize the first letter of each word
+            words[i] = word.capitalize()
+    
+    # Join words back together
+    return " ".join(words)
 
 # Add nl2br filter
 @app.template_filter('nl2br')
 def nl2br(value):
     if value:
         return Markup(value.replace('\n', '<br>'))
+
+# Add fromjson filter
+@app.template_filter('fromjson')
+def fromjson_filter(value):
+    """Convert a JSON string to a Python object and clean up field names"""
+    if not value:
+        return []
+        
+    # Handle case where value is already a list
+    if isinstance(value, list):
+        return [format_field_name(field) for field in value]
+        
+    try:
+        # First try to parse it directly
+        parsed_value = json.loads(value)
+        
+        # If it's a list, clean up each field name
+        if isinstance(parsed_value, list):
+            cleaned_fields = []
+            for field in parsed_value:
+                if isinstance(field, str):
+                    cleaned_fields.append(format_field_name(field))
+                else:
+                    cleaned_fields.append(str(field))
+            return cleaned_fields
+        return parsed_value
+    except:
+        # If that fails, try to clean up the string first
+        # This handles cases where the JSON might be malformed
+        try:
+            # Remove any extra quotes or escape characters
+            cleaned = value.replace('\\"', '"').replace('\\\\', '\\')
+            if cleaned.startswith('"') and cleaned.endswith('"'):
+                cleaned = cleaned[1:-1]
+                
+            # Handle case where the string might be a single field
+            if '[' not in cleaned and ']' not in cleaned:
+                return [format_field_name(cleaned)]
+                
+            # Try to extract fields from a malformed JSON string
+            if cleaned.startswith('[') and cleaned.endswith(']'):
+                cleaned = cleaned[1:-1]
+                
+            # Split by commas and clean up each field
+            fields = [f.strip().replace('"', '') for f in cleaned.split(',')]
+            return [format_field_name(field) for field in fields if field]
+        except:
+            # If all else fails, return an empty list
+            return []
+
+def format_field_name(field):
+    """Format a field name to be more readable"""
+    if not field:
+        return ""
+    
+    # Clean up the field name - remove quotes, brackets, etc.
+    field = field.strip().replace('[', '').replace(']', '').replace('"', '')
+    
+    # Replace underscores with spaces
+    field = field.replace('_', ' ')
+    
+    # Capitalize each word
+    field = ' '.join(word.capitalize() for word in field.split())
+    
+    # Special case handling for common abbreviations
+    field = field.replace('Id', 'ID')
+    field = field.replace('Url', 'URL')
+    field = field.replace('Api', 'API')
+    
+    return field
 
 # Load configuration from config.py
 try:
@@ -62,6 +166,14 @@ if app.config.get('GOOGLE_DRIVE_ENABLED', False):
 
 db = SQLAlchemy(app)
 
+@app.before_request
+def before_request():
+    # Make pending_requests_count available to all templates if user is admin
+    if 'logged_in' in session and session.get('is_admin', False):
+        g.pending_requests_count = UpdateRequest.query.filter_by(status='pending').count()
+    else:
+        g.pending_requests_count = 0
+
 # Helper function to check if file extension is allowed
 def allowed_file(filename, allowed_extensions):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
@@ -89,12 +201,26 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# Agent required decorator
+def agent_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'logged_in' not in session:
+            flash('Please log in to access this page', 'warning')
+            return redirect(url_for('login'))
+        if not session.get('is_agent', False) and not session.get('is_admin', False):
+            flash('You do not have permission to access this page', 'danger')
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # User model for authentication
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
+    is_agent = db.Column(db.Boolean, default=False)  # New field for agent role
     employee_id = db.Column(db.Integer, db.ForeignKey('employee.id'), nullable=True)
     employee_code = db.Column(db.String(50), nullable=True)  # Store the employee ID code
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -164,6 +290,27 @@ class Document(db.Model):
             clean_filename = self.filename.replace('\\', '/')
             return url_for('uploaded_file', filename=f'documents/{clean_filename}')
 
+# Update Request model for handling employee data update requests
+class UpdateRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employee.id'), nullable=False)
+    requested_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    request_date = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
+    reason = db.Column(db.Text, nullable=False)
+    fields_to_update = db.Column(db.Text, nullable=False)  # JSON string of fields to update
+    approved_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    approval_date = db.Column(db.DateTime, nullable=True)
+    admin_notes = db.Column(db.Text, nullable=True)  # Notes from admin when approving/rejecting
+    
+    # Relationships
+    employee = db.relationship('Employee', backref=db.backref('update_requests', lazy=True), foreign_keys=[employee_id])
+    requester = db.relationship('User', backref=db.backref('requested_updates', lazy=True), foreign_keys=[requested_by])
+    approver = db.relationship('User', backref=db.backref('approved_updates', lazy=True), foreign_keys=[approved_by])
+    
+    def __repr__(self):
+        return f'<UpdateRequest for Employee {self.employee_id} - Status: {self.status}>'
+
 # Employee model - updated with new fields
 class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -183,11 +330,16 @@ class Employee(db.Model):
     salary = db.Column(db.Float, default=0)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Track which agent created this employee
+    last_updated_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Track who last updated this employee
+    last_updated_at = db.Column(db.DateTime, nullable=True)  # Track when this employee was last updated
     
     # Relationships
     educations = db.relationship('Education', backref='employee', lazy=True, cascade="all, delete-orphan")
     certifications = db.relationship('Certification', backref='employee', lazy=True, cascade="all, delete-orphan")
     documents = db.relationship('Document', backref='employee', lazy=True, cascade="all, delete-orphan")
+    creator = db.relationship('User', backref=db.backref('created_employees', lazy=True), foreign_keys=[created_by])
+    updater = db.relationship('User', backref=db.backref('updated_employees', lazy=True), foreign_keys=[last_updated_by])
     
     def get_profile_picture_url(self):
         """Get the URL for the profile picture, either from Google Drive or local storage."""
@@ -233,6 +385,7 @@ def login():
             session['logged_in'] = True
             session['username'] = user.username
             session['is_admin'] = user.is_admin
+            session['is_agent'] = user.is_agent
             session['user_id'] = user.id
             flash(f'Welcome back, {username}!', 'success')
             return redirect(url_for('index'))
@@ -246,6 +399,8 @@ def logout():
     session.pop('logged_in', None)
     session.pop('username', None)
     session.pop('is_admin', None)
+    session.pop('is_agent', None)
+    session.pop('user_id', None)
     flash('You have been logged out', 'info')
     return redirect(url_for('login'))
 
@@ -261,6 +416,7 @@ def create_user():
         username = request.form.get('username')
         password = request.form.get('password')
         employee_id = request.form.get('employee_id')
+        user_type = request.form.get('user_type', 'regular')  # New field to determine user type
         
         # Validate inputs
         if not username or not password or not employee_id:
@@ -282,8 +438,14 @@ def create_user():
         # Check if employee_id already exists in Employee table
         existing_employee = Employee.query.filter_by(employee_id=employee_id).first()
         
-        # Create new user
-        new_user = User(username=username, is_admin=False, employee_code=employee_id)
+        # Create new user based on user_type
+        is_agent = (user_type == 'agent')
+        new_user = User(
+            username=username, 
+            is_admin=False, 
+            is_agent=is_agent,
+            employee_code=employee_id
+        )
         new_user.set_password(password)
         
         # If employee exists, link the user to the employee
@@ -293,13 +455,16 @@ def create_user():
         try:
             db.session.add(new_user)
             db.session.commit()
-            flash('User created successfully', 'success')
+            
+            user_type_display = "Agent" if is_agent else "Regular User"
+            flash(f'{user_type_display} created successfully', 'success')
             
             # Return the username and password to display to the admin in the modal
             return render_template('create_user.html', 
                                   new_username=username, 
                                   new_password=password, 
-                                  new_employee_id=employee_id)
+                                  new_employee_id=employee_id,
+                                  new_user_type=user_type_display)
         except Exception as e:
             db.session.rollback()
             flash(f'Error creating user: {str(e)}', 'danger')
@@ -330,12 +495,35 @@ def index():
             department_counts[dept] = count
             total_employees += count
         
+        # Get pending update requests count for admin
+        pending_requests_count = UpdateRequest.query.filter_by(status='pending').count()
+        
         return render_template('index.html', 
                               departments=departments, 
                               department_counts=department_counts,
-                              total_employees=total_employees)
+                              total_employees=total_employees,
+                              pending_requests_count=pending_requests_count)
+    # Check if user is an agent
+    elif session.get('is_agent', False):
+        # Agent dashboard
+        # Get the current user
+        user_id = session.get('user_id')
+        
+        # Get employees created by this agent
+        created_employees = Employee.query.filter_by(created_by=user_id).all()
+        
+        # Get pending update requests submitted by this agent
+        pending_requests = UpdateRequest.query.filter_by(requested_by=user_id, status='pending').all()
+        
+        # Get approved update requests for this agent
+        approved_requests = UpdateRequest.query.filter_by(requested_by=user_id, status='approved').all()
+        
+        return render_template('agent_dashboard.html', 
+                              created_employees=created_employees,
+                              pending_requests=pending_requests,
+                              approved_requests=approved_requests)
     else:
-        # Employee dashboard
+        # Regular employee dashboard
         # Get the current user
         user = User.query.filter_by(username=session.get('username')).first()
         
@@ -431,8 +619,16 @@ def get_positions():
     return jsonify([position[0] for position in positions])
 
 @app.route('/add', methods=['GET', 'POST'])
-@admin_required
+@login_required
 def add_employee():
+    # Check if user is admin or agent
+    is_admin = session.get('is_admin', False)
+    is_agent = session.get('is_agent', False)
+    
+    if not (is_admin or is_agent):
+        flash('You do not have permission to add employees.', 'danger')
+        return redirect(url_for('index'))
+    
     # Get all unique departments for the dropdown
     departments = db.session.query(Employee.department).distinct().all()
     departments = [dept[0] for dept in departments]
@@ -481,6 +677,9 @@ def add_employee():
                 flash('Employee ID already exists!', 'danger')
                 return redirect(url_for('add_employee'))
         
+        # Get current user ID for tracking who created this employee
+        user_id = session.get('user_id')
+        
         # Create new employee
         new_employee = Employee(
             employee_id=employee_id,
@@ -494,7 +693,11 @@ def add_employee():
             current_address=current_address,
             permanent_address=permanent_address,
             salary=salary,
-            notes=notes
+            notes=notes,
+            created_by=user_id,
+            created_at=datetime.now(),
+            last_updated_by=user_id,
+            last_updated_at=datetime.now()
         )
         
         # Add to database
@@ -566,12 +769,55 @@ def employee_details(id):
     employee = Employee.query.get_or_404(id)
     educations = Education.query.filter_by(employee_id=id).all()
     certifications = Certification.query.filter_by(employee_id=id).all()
-    return render_template('employee_details.html', employee=employee, educations=educations, certifications=certifications)
+    
+    # Get creator and updater information
+    creator = None
+    updater = None
+    
+    if employee.created_by:
+        creator = User.query.get(employee.created_by)
+    
+    if employee.last_updated_by:
+        updater = User.query.get(employee.last_updated_by)
+    
+    return render_template('employee_details.html', 
+                          employee=employee, 
+                          educations=educations, 
+                          certifications=certifications,
+                          creator=creator,
+                          updater=updater)
 
 @app.route('/employee/<int:id>/edit', methods=['GET', 'POST'])
-@admin_required
+@login_required
 def edit_employee(id):
     employee = Employee.query.get_or_404(id)
+    
+    # Check permissions
+    user_id = session.get('user_id')
+    is_admin = session.get('is_admin', False)
+    is_agent = session.get('is_agent', False)
+    
+    # If user is not an admin, check if they have permission to edit this employee
+    if not is_admin:
+        if is_agent:
+            # Check if agent created this employee
+            if employee.created_by != user_id:
+                # Check if agent has an approved update request for this employee
+                approved_request = UpdateRequest.query.filter_by(
+                    employee_id=employee.id,
+                    requested_by=user_id,
+                    status='approved'
+                ).first()
+                
+                if not approved_request:
+                    flash('You do not have permission to edit this employee. Please submit an update request first.', 'danger')
+                    return redirect(url_for('index'))
+            
+            # If we get here, the agent either created the employee or has an approved update request
+        else:
+            # Regular users can't edit employees
+            flash('You do not have permission to edit employee information', 'danger')
+            return redirect(url_for('index'))
     
     # Get all unique departments for the dropdown
     departments = db.session.query(Employee.department).distinct().all()
@@ -606,6 +852,9 @@ def edit_employee(id):
             employee.salary = float(salary) if salary else 0
         except ValueError:
             employee.salary = 0
+        # Track who made the changes
+        employee.last_updated_by = user_id
+        employee.last_updated_at = datetime.now(timezone.utc)
         
         # Update education information
         # First, remove all existing education records for this employee
@@ -687,8 +936,373 @@ def delete_employee(id):
 @app.route('/all-employees')
 @login_required
 def all_employees():
-    employees = Employee.query.all()
+    # Only admin and agents can view all employees
+    if not session.get('is_admin', False) and not session.get('is_agent', False):
+        flash('You do not have permission to access this page', 'danger')
+        return redirect(url_for('index'))
+    
+    # If user is an agent, only show employees they created
+    if session.get('is_agent', False) and not session.get('is_admin', False):
+        user_id = session.get('user_id')
+        employees = Employee.query.filter_by(created_by=user_id).all()
+    else:
+        employees = Employee.query.all()
     return render_template('all_employees.html', employees=employees)
+
+@app.route('/agent/dashboard')
+@agent_required
+def agent_dashboard():
+    # Get the current user
+    user_id = session.get('user_id')
+    
+    # Get employees created by this agent
+    created_employees = Employee.query.filter_by(created_by=user_id).all()
+    
+    # Get pending update requests submitted by this agent
+    pending_requests = UpdateRequest.query.filter_by(requested_by=user_id, status='pending').all()
+    
+    # Get approved update requests for this agent
+    approved_requests = UpdateRequest.query.filter_by(requested_by=user_id, status='approved').all()
+    
+    # Get rejected update requests for this agent
+    rejected_requests = UpdateRequest.query.filter_by(requested_by=user_id, status='rejected').all()
+    
+    return render_template('agent_dashboard.html',
+                          created_employees=created_employees,
+                          pending_requests=pending_requests,
+                          approved_requests=approved_requests,
+                          rejected_requests=rejected_requests)
+
+@app.route('/agent/onboarding', methods=['GET', 'POST'])
+@agent_required
+def agent_onboarding():
+    # Get the current user ID
+    user_id = session.get('user_id')
+    
+    if request.method == 'POST':
+        # Create new employee
+        new_employee = Employee(
+            employee_id=request.form.get('employee_id', ''),
+            first_name=request.form['first_name'],
+            last_name=request.form['last_name'],
+            email=request.form['email'],
+            phone=request.form['phone'],
+            department=request.form.get('department', 'Unassigned'),
+            position=request.form.get('position', 'New Hire'),
+            hire_date=datetime.strptime(request.form.get('hire_date'), '%Y-%m-%d').date() if request.form.get('hire_date') else datetime.now(timezone.utc).date(),
+            current_address=request.form['current_address'],
+            permanent_address=request.form.get('permanent_address', ''),
+            salary=float(request.form.get('salary', 0)),
+            notes=request.form.get('notes', ''),
+            created_by=user_id,
+            created_at=datetime.now(timezone.utc)
+        )
+        
+        # Add to database
+        db.session.add(new_employee)
+        db.session.commit()
+        
+        # Handle profile picture upload
+        if 'profile_picture' in request.files and request.files['profile_picture'].filename:
+            profile_pic = request.files['profile_picture']
+            if profile_pic and allowed_file(profile_pic.filename, app.config['ALLOWED_IMAGE_EXTENSIONS']):
+                try:
+                    # Generate unique filename
+                    filename = secure_filename(profile_pic.filename)
+                    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+                    
+                    # Check if Google Drive is enabled
+                    drive_file_id = None
+                    if app.config.get('GOOGLE_DRIVE_ENABLED', False) and drive_helper.is_enabled():
+                        # Create or get employee folder in Google Drive
+                        employee_folder_name = f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}"
+                        
+                        if not new_employee.drive_folder_id:
+                            employee_folder_id = drive_helper.create_folder(
+                                folder_name=employee_folder_name, 
+                                parent_id=drive_helper.root_folder_id
+                            )
+                            # Update employee record with folder ID
+                            new_employee.drive_folder_id = employee_folder_id
+                            db.session.commit()
+                        else:
+                            employee_folder_id = new_employee.drive_folder_id
+                        
+                        # Upload profile picture to Google Drive
+                        # Save file temporarily to disk
+                        temp_file_path = os.path.join(app.config['PROFILE_PICTURES_FOLDER'], 'temp', unique_filename)
+                        os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+                        profile_pic.save(temp_file_path)
+                        
+                        # Upload to Google Drive
+                        drive_file_id = drive_helper.upload_file(
+                            file_path=temp_file_path,
+                            file_name=unique_filename,
+                            parent_folder_id=employee_folder_id,
+                            mime_type=profile_pic.content_type
+                        )
+                        
+                        # Make the file publicly accessible
+                        if drive_file_id:
+                            drive_helper.make_file_public(drive_file_id)
+                        
+                        # Remove temporary file
+                        try:
+                            os.remove(temp_file_path)
+                        except:
+                            pass
+                        
+                        # Update employee record with the Drive file ID
+                        new_employee.drive_profile_pic_id = drive_file_id
+                    
+                    # Also save locally as backup
+                    employee_folder = os.path.join(app.config['PROFILE_PICTURES_FOLDER'], f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}")
+                    os.makedirs(employee_folder, exist_ok=True)
+                    file_path = os.path.join(employee_folder, unique_filename)
+                    profile_pic.save(file_path)
+                    
+                    # Update employee record with the new profile picture
+                    new_employee.profile_picture = os.path.join(f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}", unique_filename)
+                    db.session.commit()
+                except Exception as e:
+                    flash(f'Error uploading profile picture: {str(e)}', 'danger')
+        
+        # Handle document uploads
+        for doc_type in ['certificate', 'experience_letter', 'offer_letter']:
+            if doc_type in request.files and request.files[doc_type].filename:
+                doc_file = request.files[doc_type]
+                if doc_file and allowed_file(doc_file.filename, app.config['ALLOWED_DOCUMENT_EXTENSIONS']):
+                    try:
+                        # Generate unique filename
+                        filename = secure_filename(doc_file.filename)
+                        unique_filename = f"{doc_type}_{uuid.uuid4().hex}_{filename}"
+                        
+                        # Check if Google Drive is enabled
+                        drive_file_id = None
+                        if app.config.get('GOOGLE_DRIVE_ENABLED', False) and drive_helper.is_enabled():
+                            # Create employee folder in Google Drive if it doesn't exist
+                            employee_folder_name = f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}"
+                            
+                            # Create or get employee folder in Google Drive
+                            if not new_employee.drive_folder_id:
+                                employee_folder_id = drive_helper.create_folder(
+                                    folder_name=employee_folder_name, 
+                                    parent_id=drive_helper.root_folder_id
+                                )
+                                # Update employee record with folder ID
+                                new_employee.drive_folder_id = employee_folder_id
+                                db.session.commit()
+                            else:
+                                employee_folder_id = new_employee.drive_folder_id
+                            
+                            # Upload file to Google Drive
+                            # Save file temporarily to disk
+                            temp_file_path = os.path.join(app.config['DOCUMENTS_FOLDER'], 'temp', unique_filename)
+                            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+                            doc_file.save(temp_file_path)
+                            
+                            # Upload to Google Drive
+                            drive_file_id = drive_helper.upload_file(
+                                file_path=temp_file_path,
+                                file_name=unique_filename,
+                                parent_folder_id=employee_folder_id,
+                                mime_type=doc_file.content_type
+                            )
+                            
+                            # Make the file publicly accessible
+                            if drive_file_id:
+                                drive_helper.make_file_public(drive_file_id)
+                            
+                            # Remove temporary file
+                            try:
+                                os.remove(temp_file_path)
+                            except:
+                                pass
+                        
+                        # Also save locally as backup
+                        employee_folder = os.path.join(app.config['DOCUMENTS_FOLDER'], f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}")
+                        os.makedirs(employee_folder, exist_ok=True)
+                        file_path = os.path.join(employee_folder, unique_filename)
+                        doc_file.save(file_path)
+                        
+                        # Create document record
+                        document = Document(
+                            employee_id=new_employee.id,
+                            filename=os.path.join(f"{new_employee.employee_id}_{new_employee.first_name}_{new_employee.last_name}", unique_filename),
+                            original_filename=filename,
+                            document_type=doc_type,
+                            drive_file_id=drive_file_id
+                        )
+                        db.session.add(document)
+                        db.session.commit()
+                    except Exception as e:
+                        flash(f'Error uploading {doc_type}: {str(e)}', 'danger')
+        
+        # Process education information if provided
+        education_count = int(request.form.get('education_count', 0))
+        for i in range(education_count):
+            if request.form.get(f'institution_{i}'):
+                institution = request.form.get(f'institution_{i}')
+                degree = request.form.get(f'degree_{i}')
+                field_of_study = request.form.get(f'field_of_study_{i}')
+                start_date_str = request.form.get(f'edu_start_date_{i}')
+                end_date_str = request.form.get(f'edu_end_date_{i}')
+                description = request.form.get(f'edu_description_{i}', '')
+                
+                # Convert string dates to datetime objects
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+                
+                education = Education(
+                    employee_id=new_employee.id,
+                    institution=institution,
+                    degree=degree,
+                    field_of_study=field_of_study,
+                    start_date=start_date,
+                    end_date=end_date,
+                    description=description
+                )
+                db.session.add(education)
+        
+        # Process certification information if provided
+        cert_count = int(request.form.get('certification_count', 0))
+        for i in range(cert_count):
+            if request.form.get(f'cert_name_{i}'):
+                name = request.form.get(f'cert_name_{i}')
+                issuing_organization = request.form.get(f'issuing_organization_{i}')
+                issue_date_str = request.form.get(f'issue_date_{i}')
+                expiry_date_str = request.form.get(f'expiry_date_{i}')
+                credential_id = request.form.get(f'credential_id_{i}', '')
+                credential_url = request.form.get(f'credential_url_{i}', '')
+                
+                # Convert string dates to datetime objects
+                issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d').date() if issue_date_str else None
+                expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d').date() if expiry_date_str else None
+                
+                certification = Certification(
+                    employee_id=new_employee.id,
+                    name=name,
+                    issuing_organization=issuing_organization,
+                    issue_date=issue_date,
+                    expiry_date=expiry_date,
+                    credential_id=credential_id,
+                    credential_url=credential_url
+                )
+                db.session.add(certification)
+        
+        db.session.commit()
+        
+        flash('Employee profile has been created successfully!', 'success')
+        return redirect(url_for('index'))
+    
+    # Get all unique departments for the dropdown
+    departments = db.session.query(Employee.department).distinct().all()
+    departments = [dept[0] for dept in departments]
+    
+    return render_template('agent_onboarding.html', 
+                          employee=None, 
+                          departments=departments, 
+                          educations=[], 
+                          certifications=[],
+                          documents=[])
+
+@app.route('/agent/request-update/<int:employee_id>', methods=['GET', 'POST'])
+@agent_required
+def request_update(employee_id):
+    # Get the employee
+    employee = db.session.get(Employee, employee_id)
+    if not employee:
+        flash('Employee not found', 'danger')
+        return redirect(url_for('index'))
+    
+    # Check if the agent created this employee
+    user_id = session.get('user_id')
+    if employee.created_by != user_id and not session.get('is_admin', False):
+        flash('You do not have permission to request updates for this employee', 'danger')
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        # Get form data
+        reason = request.form.get('reason')
+        fields = request.form.getlist('fields_to_update')
+        additional_notes = request.form.get('additional_notes', '')
+        
+        # Validate inputs
+        if not reason or not fields:
+            flash('Please provide a reason and select at least one field to update', 'danger')
+            return render_template('request_update.html', employee=employee)
+        
+        # Create update request
+        update_request = UpdateRequest(
+            employee_id=employee.id,
+            requested_by=user_id,
+            reason=reason,
+            fields_to_update=json.dumps(fields),  # Store as JSON string
+            request_date=datetime.now(timezone.utc),
+            status='pending'
+        )
+        
+        # Add additional notes if provided
+        if additional_notes:
+            update_request.reason += f"\n\nAdditional Notes: {additional_notes}"
+        
+        # Save to database
+        db.session.add(update_request)
+        db.session.commit()
+        
+        flash('Update request submitted successfully. You will be notified when it is approved.', 'success')
+        return redirect(url_for('index'))
+    
+    return render_template('request_update.html', employee=employee)
+
+@app.route('/admin/update-requests', methods=['GET'])
+@admin_required
+def update_requests():
+    # Get all update requests
+    pending_requests = UpdateRequest.query.filter_by(status='pending').all()
+    approved_requests = UpdateRequest.query.filter_by(status='approved').all()
+    rejected_requests = UpdateRequest.query.filter_by(status='rejected').all()
+    
+    return render_template('update_requests.html', 
+                          pending_requests=pending_requests,
+                          approved_requests=approved_requests,
+                          rejected_requests=rejected_requests)
+
+@app.route('/admin/update-request/<int:request_id>/<action>', methods=['POST'])
+@admin_required
+def process_update_request(request_id, action):
+    # Get the update request
+    update_request = db.session.get(UpdateRequest, request_id)
+    if not update_request:
+        flash('Update request not found', 'danger')
+        return redirect(url_for('update_requests'))
+    
+    # Get admin notes if provided
+    admin_notes = request.form.get('admin_notes', '')
+    
+    # Process the action
+    if action == 'approve':
+        update_request.status = 'approved'
+        update_request.approved_by = session.get('user_id')
+        update_request.approval_date = datetime.now(timezone.utc)
+        if admin_notes:
+            update_request.admin_notes = admin_notes
+        flash('Update request approved', 'success')
+    elif action == 'reject':
+        update_request.status = 'rejected'
+        update_request.approved_by = session.get('user_id')  # Track who rejected it
+        update_request.approval_date = datetime.now(timezone.utc)
+        if admin_notes:
+            update_request.admin_notes = admin_notes
+        flash('Update request rejected', 'warning')
+    else:
+        flash('Invalid action', 'danger')
+        return redirect(url_for('update_requests'))
+    
+    # Save changes
+    db.session.commit()
+    
+    return redirect(url_for('update_requests'))
 
 @app.route('/self-onboarding', methods=['GET', 'POST'])
 @login_required
@@ -1270,6 +1884,99 @@ def delete_document(document_id):
     
     flash('Document deleted successfully', 'success')
     return redirect(url_for('self_onboarding'))
+
+# Database Backup and Restore Routes
+@app.route('/admin/backup/<action>', methods=['GET', 'POST'])
+@admin_required
+def admin_backup(action):
+    """
+    Handle database backup and restore operations
+    
+    Args:
+        action: 'view' to display the backup page, 'create' to create a backup, 'restore' to restore from a backup
+    """
+    # Create backups directory if it doesn't exist
+    backups_dir = os.path.join(app.root_path, 'backups')
+    if not os.path.exists(backups_dir):
+        os.makedirs(backups_dir)
+    
+    # Get database path
+    db_path = os.path.join(app.root_path, 'instance', 'employees.db')
+    if not os.path.exists(db_path):
+        db_path = os.path.join(app.root_path, 'employees.db')
+    
+    if action == 'create' and request.method == 'POST':
+        # Generate backup filename with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        backup_filename = f'backup_{timestamp}.db'
+        backup_path = os.path.join(backups_dir, backup_filename)
+        
+        try:
+            # Copy the database file
+            shutil.copy2(db_path, backup_path)
+            flash(f'Database backup created successfully: {backup_filename}', 'success')
+        except Exception as e:
+            flash(f'Error creating backup: {str(e)}', 'danger')
+        
+        return redirect(url_for('admin_backup', action='view'))
+    
+    elif action == 'restore' and request.method == 'POST':
+        backup_file = request.form.get('backup_file')
+        if not backup_file:
+            flash('No backup file specified', 'danger')
+            return redirect(url_for('admin_backup', action='view'))
+        
+        backup_path = os.path.join(backups_dir, backup_file)
+        
+        if not os.path.exists(backup_path):
+            flash(f'Backup file not found: {backup_file}', 'danger')
+            return redirect(url_for('admin_backup', action='view'))
+        
+        try:
+            # Close the database connection
+            db.session.close()
+            
+            # Copy the backup file to the database location
+            shutil.copy2(backup_path, db_path)
+            
+            # Reconnect to the database
+            db.engine.dispose()
+            
+            flash(f'Database restored successfully from: {backup_file}', 'success')
+        except Exception as e:
+            flash(f'Error restoring database: {str(e)}', 'danger')
+        
+        return redirect(url_for('admin_backup', action='view'))
+    
+    # Default: view backups
+    backups = []
+    for filename in os.listdir(backups_dir):
+        if filename.startswith('backup_') and filename.endswith('.db'):
+            file_path = os.path.join(backups_dir, filename)
+            file_stats = os.stat(file_path)
+            
+            # Extract timestamp from filename
+            timestamp_str = filename.replace('backup_', '').replace('.db', '')
+            try:
+                # Convert timestamp string to datetime object
+                timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S')
+                formatted_timestamp = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                formatted_timestamp = "Unknown"
+            
+            # Format file size
+            size = humanize.naturalsize(file_stats.st_size)
+            
+            backups.append({
+                'filename': filename,
+                'timestamp': formatted_timestamp,
+                'size': size
+            })
+    
+    # Sort backups by timestamp (newest first)
+    backups.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    return render_template('admin/backup.html', backups=backups)
 
 if __name__ == '__main__':
     import argparse
